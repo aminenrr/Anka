@@ -3328,21 +3328,28 @@ bool TextureCache<P>::UploadInChunks(Image& image) {
         MapSizeBytes(image) < min_size) {
         return false;
     }
-    std::vector<u8> data;
     for (u64 offset = 0; offset < image.guest_size_bytes; offset += chunk_size) {
         const std::array range{
             std::pair<u64, u64>{offset, std::min<u64>(offset + chunk_size, image.guest_size_bytes)}};
-        data.clear();
-        const auto copies = UnswizzleImageRows(*gpu_memory, image.gpu_addr, image.info, range, data);
-        if (copies.empty()) {
+        // Plan first, then unswizzle straight into the staging buffer: no intermediate copy.
+        const auto plan = PlanUnswizzleImageRows(image.gpu_addr, image.info, range);
+        if (!plan.layout_valid) {
             if (offset == 0) {
                 return false; // layout not handled: one staging buffer after all
             }
+            continue;
+        }
+        if (plan.copies.empty()) {
             continue; // padding between levels or layers
         }
-        auto staging = runtime.UploadStagingBuffer(data.size());
-        std::memcpy(staging.mapped_span.data(), data.data(), data.size());
-        image.UploadMemory(staging, copies);
+        auto staging = runtime.UploadStagingBuffer(plan.total_host_bytes);
+        ExecuteUnswizzlePlan(*gpu_memory, plan, staging.mapped_span);
+        image.UploadMemory(staging, plan.copies);
+        if (offset + chunk_size < image.guest_size_bytes) {
+            // Submit and wait so this chunk's staging memory can be reused by the next one;
+            // without it every chunk's buffer stays alive until the next scheduler flush.
+            runtime.Finish();
+        }
     }
     runtime.InsertUploadMemoryBarrier();
     return true;
