@@ -12,6 +12,8 @@ on:
     branches:
       - anka
       - test-build
+    paths-ignore:
+      - '**.md'
 
 permissions:
   contents: read
