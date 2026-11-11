@@ -1,0 +1,112 @@
+name: anka-test-build
+
+# Windows test builds of this fork. Every push to `anka` (baseline) or `test-build` (the ported
+# changes merged together) builds anka.exe and anka-cli.exe and uploads them as an artifact,
+# laid out like the Anka release zip (launchers, empty portable user folder).
+# No LTO or PGO, so it is slower than the official release: compare a test-build artifact with an
+# `anka` artifact from this same workflow, not with the release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - anka
+      - test-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anka-test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtcharts
+          cache: true
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: ./tools/windows/install-vulkan-sdk.ps1
+
+      - name: Verify glslangValidator
+        shell: pwsh
+        run: glslangValidator --version
+
+      - name: Cache CPM downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('cpmfile.json', 'CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
+
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S . -B build/release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DENABLE_QT=ON
+          -DYUZU_CMD=ON
+          -DYUZU_USE_BUNDLED_QT=OFF
+          -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          -DYUZU_USE_BUNDLED_SDL3=ON
+          -DENABLE_WERROR=OFF
+          -DENABLE_UPDATE_CHECKER=OFF
+          -DENABLE_WEB_SERVICE=OFF
+          -DUSE_DISCORD_PRESENCE=OFF
+          -DBUILD_TESTING=OFF
+          -DYUZU_TESTS=OFF
+          -DYUZU_ROOM=OFF
+          -DYUZU_ROOM_STANDALONE=OFF
+          -DCMAKE_INTERMEDIATE_DIR_STRATEGY=SHORT
+
+      - name: Build
+        shell: bash
+        run: cmake --build build/release --target yuzu yuzu-cmd --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $bin = "build/release/bin"
+          foreach ($exe in 'eglantine.exe', 'eden-cli.exe') {
+            if (-not (Test-Path "$bin/$exe")) { throw "$bin/$exe was not produced" }
+          }
+          windeployqt --release --no-translations "$bin/eglantine.exe"
+          $out = "package/Anka"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item -Recurse "$bin/*" $out
+          Move-Item "$out/eglantine.exe" "$out/anka.exe"
+          Move-Item "$out/eden-cli.exe" "$out/anka-cli.exe"
+          Get-ChildItem "$out" -Filter *.pdb -Recurse | Remove-Item
+          Copy-Item dist/anka/*.bat, dist/anka/anka-config.ps1 $out
+          Copy-Item -Recurse dist/anka/Games $out
+          New-Item -ItemType Directory -Force "$out/user" | Out-Null
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          "Anka test build: ${{ github.ref_name }} at $sha (no LTO/PGO, no second core)" | Out-File "$out/BUILD_INFO.txt"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anka-${{ github.ref_name }}-windows-x64-${{ github.sha }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 14
