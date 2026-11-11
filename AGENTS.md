@@ -2,6 +2,16 @@
 
 Notes for any coding agent working on this fork. Read this first.
 
+## Upstream rules (kept from Eden's AGENTS.md)
+
+- Read and follow the AI policy in `docs/policies/AI.md` and the coding policies in `docs/policies/Coding.md`.
+- Keep comments to a reasonable level. Do not overexplain or add/remove comments in unrelated parts of the codebase.
+- Eden's rule is "never submit PRs or push commits on behalf of the user". **In this fork the owner
+  has allowed it, for branches and draft PRs inside aminenrr/Anka only.** Never push to, or open PRs
+  or issues on, EddizEge/Anka, Eden or Fritchii. If a change is ever sent upstream, the owner sends it
+  himself, with the AI disclosure that `docs/policies/AI.md` requires in the commit message and the
+  PR description.
+
 ## What this fork is for
 
 Run **Donkey Kong Bananza** (Switch 2, title `040074A01BF12000`) as close to 60 fps as possible on the
